@@ -65,9 +65,6 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.
 	}
 
 	resolvedTag := common.GetContextKeyString(ctx, constant.ContextKeyResolvedChannelTag)
-	if resolvedTag == "" {
-		resolvedTag = common.GetContextKeyString(ctx, constant.ContextKeyChannelTag)
-	}
 	groupRatioInfo.MatchedTag = resolvedTag
 
 	billingAttribution := common.GetContextKeyString(ctx, constant.ContextKeyBillingAttribution)
