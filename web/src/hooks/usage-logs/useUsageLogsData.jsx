@@ -425,6 +425,57 @@ export const useLogsData = () => {
         });
       }
       if (logs[i].type === 2) {
+        const billingAttribution =
+          other?.billing_attribution ||
+          other?.matched_channel_tag ||
+          other?.selected_public_group;
+        const billingRatio = Number(other?.effective_billing_ratio);
+        const hasBillingRatio = Number.isFinite(billingRatio);
+        const billingFallback = other?.billing_ratio_fallback === true;
+
+        if (isAdminUser) {
+          if (other?.selected_public_group) {
+            expandDataLocal.push({
+              key: t('用户选择分组'),
+              value: other.selected_public_group,
+            });
+          }
+          if (other?.matched_channel_tag) {
+            expandDataLocal.push({
+              key: t('命中渠道标签'),
+              value: billingFallback
+                ? `${other.matched_channel_tag}（${t('默认规则')}）`
+                : other.matched_channel_tag,
+            });
+          } else if (billingFallback && other?.selected_public_group) {
+            expandDataLocal.push({
+              key: t('命中渠道标签'),
+              value: t('默认规则（未命中渠道标签）'),
+            });
+          }
+          if (hasBillingRatio) {
+            expandDataLocal.push({
+              key: t('实际计费倍率'),
+              value: `${billingRatio}x`,
+            });
+          }
+        } else {
+          if (billingAttribution) {
+            expandDataLocal.push({
+              key: t('计费归属'),
+              value: billingFallback
+                ? `${billingAttribution}（${t('默认规则')}）`
+                : billingAttribution,
+            });
+          }
+          if (hasBillingRatio) {
+            expandDataLocal.push({
+              key: t('计费倍率'),
+              value: `${billingRatio}x`,
+            });
+          }
+        }
+
         expandDataLocal.push({
           key: t('日志详情'),
           value: other?.claude

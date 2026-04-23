@@ -383,7 +383,7 @@ function getUsageLogGroupSummary(groupRatio, userGroupRatio, t) {
   if (ratio === undefined || ratio === null || ratio === '') {
     return '';
   }
-  return `${useUserGroupRatio ? t('专属倍率') : t('分组')} ${formatRatio(ratio)}x`;
+  return `${useUserGroupRatio ? t('专属计费倍率') : t('计费倍率')} ${formatRatio(ratio)}x`;
 }
 
 function renderCompactDetailSummary(summarySegments) {

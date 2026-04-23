@@ -47,14 +47,29 @@ import GroupTable from './components/GroupTable';
 import AutoGroupList from './components/AutoGroupList';
 import GroupGroupRatioRules from './components/GroupGroupRatioRules';
 import GroupSpecialUsableRules from './components/GroupSpecialUsableRules';
+import PublicGroupTagRatioRules from './components/PublicGroupTagRatioRules';
+import PublicGroupModelTagRules from './components/PublicGroupModelTagRules';
 
 const { Text, Title, Paragraph } = Typography;
+
+const DEFAULT_INPUTS = {
+  GroupRatio: '',
+  UserUsableGroups: '',
+  GroupGroupRatio: '',
+  'group_ratio_setting.group_special_usable_group': '',
+  'group_ratio_setting.public_group_tag_ratio': '',
+  'group_ratio_setting.public_group_model_tag': '',
+  AutoGroups: '',
+  DefaultUseAutoGroup: false,
+};
 
 const OPTION_KEYS = [
   'GroupRatio',
   'UserUsableGroups',
   'GroupGroupRatio',
   'group_ratio_setting.group_special_usable_group',
+  'group_ratio_setting.public_group_tag_ratio',
+  'group_ratio_setting.public_group_model_tag',
   'AutoGroups',
   'DefaultUseAutoGroup',
 ];
@@ -74,14 +89,7 @@ export default function GroupRatioSettings(props) {
   const [editMode, setEditMode] = useState('visual');
   const [showGuide, setShowGuide] = useState(false);
 
-  const [inputs, setInputs] = useState({
-    GroupRatio: '',
-    UserUsableGroups: '',
-    GroupGroupRatio: '',
-    'group_ratio_setting.group_special_usable_group': '',
-    AutoGroups: '',
-    DefaultUseAutoGroup: false,
-  });
+  const [inputs, setInputs] = useState(DEFAULT_INPUTS);
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
   const dataVersionRef = useRef(0);
@@ -140,7 +148,7 @@ export default function GroupRatioSettings(props) {
   }
 
   useEffect(() => {
-    const currentInputs = {};
+    const currentInputs = { ...DEFAULT_INPUTS };
     for (let key in props.options) {
       if (OPTION_KEYS.includes(key)) {
         currentInputs[key] = props.options[key];
@@ -173,6 +181,20 @@ export default function GroupRatioSettings(props) {
     setInputs((prev) => ({
       ...prev,
       'group_ratio_setting.group_special_usable_group': value,
+    }));
+  }, []);
+
+  const handlePublicGroupTagRatioChange = useCallback((value) => {
+    setInputs((prev) => ({
+      ...prev,
+      'group_ratio_setting.public_group_tag_ratio': value,
+    }));
+  }, []);
+
+  const handlePublicGroupModelTagChange = useCallback((value) => {
+    setInputs((prev) => ({
+      ...prev,
+      'group_ratio_setting.public_group_model_tag': value,
     }));
   }, []);
 
@@ -248,6 +270,30 @@ export default function GroupRatioSettings(props) {
           value={inputs['group_ratio_setting.group_special_usable_group']}
           groupNames={groupNames}
           onChange={handleSpecialUsableChange}
+        />
+      </Form.Section>
+
+      <Form.Section text={t('公开分组标签倍率')}>
+        <Text type='tertiary' size='small' style={{ display: 'block', marginBottom: 12 }}>
+          {t('为公开分组按渠道标签设置实际计费倍率。命中标签后优先使用这里的倍率；未命中时回退到上方分组倍率。')}
+        </Text>
+        <PublicGroupTagRatioRules
+          key={`pgtr_${dv}`}
+          value={inputs['group_ratio_setting.public_group_tag_ratio']}
+          groupNames={groupNames}
+          onChange={handlePublicGroupTagRatioChange}
+        />
+      </Form.Section>
+
+      <Form.Section text={t('公开分组模型标签覆盖')}>
+        <Text type='tertiary' size='small' style={{ display: 'block', marginBottom: 12 }}>
+          {t('为公开分组按模型强制指定渠道标签。配置后优先使用这里的标签；未配置时再按渠道能力自动匹配。')}
+        </Text>
+        <PublicGroupModelTagRules
+          key={`pgmt_${dv}`}
+          value={inputs['group_ratio_setting.public_group_model_tag']}
+          groupNames={groupNames}
+          onChange={handlePublicGroupModelTagChange}
         />
       </Form.Section>
     </Form>
@@ -363,6 +409,60 @@ export default function GroupRatioSettings(props) {
                 setInputs((prev) => ({
                   ...prev,
                   'group_ratio_setting.group_special_usable_group': value,
+                }))
+              }
+            />
+          </Col>
+        </Row>
+        <Row gutter={16}>
+          <Col xs={24} sm={16}>
+            <Form.TextArea
+              label={t('公开分组标签倍率设置')}
+              placeholder={t('为一个 JSON 文本')}
+              extraText={t(
+                '键为公开分组名称，值为标签倍率映射对象。内层键为渠道标签，值为命中该标签时使用的倍率，例如：{"default": {"openai": 1, "claude-3p": 0.8}}，表示 default 公开分组命中 openai 标签时倍率为 1，命中 claude-3p 标签时倍率为 0.8。未命中时回退到默认分组倍率',
+              )}
+              field={'group_ratio_setting.public_group_tag_ratio'}
+              autosize={{ minRows: 6, maxRows: 12 }}
+              trigger='blur'
+              stopValidateWithError
+              rules={[
+                {
+                  validator: (rule, value) => verifyJSON(value),
+                  message: t('不是合法的 JSON 字符串'),
+                },
+              ]}
+              onChange={(value) =>
+                setInputs((prev) => ({
+                  ...prev,
+                  'group_ratio_setting.public_group_tag_ratio': value,
+                }))
+              }
+            />
+          </Col>
+        </Row>
+        <Row gutter={16}>
+          <Col xs={24} sm={16}>
+            <Form.TextArea
+              label={t('公开分组模型标签覆盖设置')}
+              placeholder={t('为一个 JSON 文本')}
+              extraText={t(
+                '键为公开分组名称，值为模型到渠道标签的映射对象。内层键为模型名称，值为强制使用的渠道标签，例如：{"default": {"gpt-4.1": "openai", "claude-sonnet-4-20250514": "claude-3p"}}，表示这些模型在 default 公开分组下优先使用对应标签。未配置时按渠道能力自动匹配',
+              )}
+              field={'group_ratio_setting.public_group_model_tag'}
+              autosize={{ minRows: 6, maxRows: 12 }}
+              trigger='blur'
+              stopValidateWithError
+              rules={[
+                {
+                  validator: (rule, value) => verifyJSON(value),
+                  message: t('不是合法的 JSON 字符串'),
+                },
+              ]}
+              onChange={(value) =>
+                setInputs((prev) => ({
+                  ...prev,
+                  'group_ratio_setting.public_group_model_tag': value,
                 }))
               }
             />

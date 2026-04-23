@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -43,6 +44,37 @@ func (p *RetryParam) IncreaseRetry() {
 
 func (p *RetryParam) ResetRetryNextTry() {
 	p.resetNextTry = true
+}
+
+func hasRouteTagCandidate(group string, modelName string, resolution *GroupBillingResolution) bool {
+	return resolution != nil &&
+		resolution.RouteTag != "" &&
+		common.StringsContains(model.GetEnabledTagsByGroupModel(group, modelName), resolution.RouteTag)
+}
+
+func GetRandomSatisfiedChannelByResolution(group string, modelName string, resolution *GroupBillingResolution, retry int) (*model.Channel, error) {
+	if hasRouteTagCandidate(group, modelName, resolution) {
+		channel, err := model.GetRandomSatisfiedChannel(group, modelName, resolution.RouteTag, retry)
+		if err != nil {
+			return nil, err
+		}
+		if channel != nil || resolution.RouteTagStrict {
+			return channel, nil
+		}
+	} else if resolution != nil && resolution.RouteTagStrict {
+		return nil, nil
+	}
+	return model.GetRandomSatisfiedChannel(group, modelName, "", retry)
+}
+
+func IsChannelEnabledForResolution(group string, modelName string, resolution *GroupBillingResolution, channelID int) bool {
+	if resolution != nil && resolution.RouteTag != "" {
+		if !hasRouteTagCandidate(group, modelName, resolution) {
+			return false
+		}
+		return model.IsChannelEnabledForGroupModelTag(group, modelName, resolution.RouteTag, channelID)
+	}
+	return model.IsChannelEnabledForGroupModel(group, modelName, channelID)
 }
 
 // CacheGetRandomSatisfiedChannel tries to get a random channel that satisfies the requirements.
@@ -91,6 +123,9 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			return nil, selectGroup, errors.New("auto groups is not enabled")
 		}
 		autoGroups := GetUserAutoGroup(userGroup)
+		var lastResolutionErr error
+		lastResolutionGroup := ""
+		resolvedAnyGroup := false
 
 		// startGroupIndex: the group index to start searching from
 		// startGroupIndex: 开始搜索的分组索引
@@ -105,6 +140,14 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 
 		for i := startGroupIndex; i < len(autoGroups); i++ {
 			autoGroup := autoGroups[i]
+			resolution, resolveErr := ResolveAndApplyGroupBilling(param.Ctx, autoGroup, param.ModelName)
+			if resolveErr != nil {
+				lastResolutionErr = resolveErr
+				lastResolutionGroup = autoGroup
+				logger.LogWarn(param.Ctx, fmt.Sprintf("Skip auto group %s for model %s: %s", autoGroup, param.ModelName, resolveErr.Error()))
+				continue
+			}
+			resolvedAnyGroup = true
 			// Calculate priorityRetry for current group
 			// 计算当前分组的 priorityRetry
 			priorityRetry := param.GetRetry()
@@ -115,7 +158,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			}
 			logger.LogDebug(param.Ctx, "Auto selecting group: %s, priorityRetry: %d", autoGroup, priorityRetry)
 
-			channel, _ = model.GetRandomSatisfiedChannel(autoGroup, param.ModelName, priorityRetry)
+			channel, _ = GetRandomSatisfiedChannelByResolution(autoGroup, param.ModelName, resolution, priorityRetry)
 			if channel == nil {
 				// Current group has no available channel for this model, try next group
 				// 当前分组没有该模型的可用渠道，尝试下一个分组
@@ -152,8 +195,15 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			}
 			break
 		}
+		if channel == nil && !resolvedAnyGroup && lastResolutionErr != nil {
+			return nil, lastResolutionGroup, lastResolutionErr
+		}
 	} else {
-		channel, err = model.GetRandomSatisfiedChannel(param.TokenGroup, param.ModelName, param.GetRetry())
+		resolution, resolveErr := ResolveAndApplyGroupBilling(param.Ctx, param.TokenGroup, param.ModelName)
+		if resolveErr != nil {
+			return nil, param.TokenGroup, resolveErr
+		}
+		channel, err = GetRandomSatisfiedChannelByResolution(param.TokenGroup, param.ModelName, resolution, param.GetRetry())
 		if err != nil {
 			return nil, param.TokenGroup, err
 		}

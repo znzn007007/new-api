@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -45,6 +46,7 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.
 		logger.LogDebug(ctx, fmt.Sprintf("final group: %s", autoGroup))
 		relayInfo.UsingGroup = autoGroup.(string)
 	}
+	groupRatioInfo.PublicGroup = relayInfo.UsingGroup
 
 	// check user group special ratio
 	userGroupRatio, ok := ratio_setting.GetGroupGroupRatio(relayInfo.UserGroup, relayInfo.UsingGroup)
@@ -53,9 +55,41 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.
 		groupRatioInfo.GroupSpecialRatio = userGroupRatio
 		groupRatioInfo.GroupRatio = userGroupRatio
 		groupRatioInfo.HasSpecialRatio = true
+		groupRatioInfo.GroupDefaultRatio = userGroupRatio
+		groupRatioInfo.BillingRatioSource = "public_group_special"
 	} else {
 		// normal group ratio
 		groupRatioInfo.GroupRatio = ratio_setting.GetGroupRatio(relayInfo.UsingGroup)
+		groupRatioInfo.GroupDefaultRatio = groupRatioInfo.GroupRatio
+		groupRatioInfo.BillingRatioSource = "public_group_default"
+	}
+
+	resolvedTag := common.GetContextKeyString(ctx, constant.ContextKeyResolvedChannelTag)
+	groupRatioInfo.MatchedTag = resolvedTag
+
+	billingAttribution := common.GetContextKeyString(ctx, constant.ContextKeyBillingAttribution)
+	if billingAttribution == "" {
+		billingAttribution = relayInfo.UsingGroup
+	}
+	groupRatioInfo.BillingAttribution = billingAttribution
+
+	if source := common.GetContextKeyString(ctx, constant.ContextKeyBillingRatioSource); source != "" {
+		groupRatioInfo.BillingRatioSource = source
+	}
+	groupRatioInfo.BillingRatioFallback = common.GetContextKeyBool(ctx, constant.ContextKeyBillingRatioFallback)
+
+	if resolvedTag != "" {
+		if ratio, tagMatched := ratio_setting.GetPublicGroupTagRatio(relayInfo.UsingGroup, resolvedTag); tagMatched {
+			groupRatioInfo.GroupRatio = ratio
+			groupRatioInfo.BillingRatioSource = "tag"
+			groupRatioInfo.BillingRatioFallback = false
+			groupRatioInfo.HasSpecialRatio = false
+			groupRatioInfo.GroupSpecialRatio = -1
+		} else {
+			groupRatioInfo.BillingRatioFallback = true
+		}
+	} else {
+		groupRatioInfo.BillingRatioFallback = true
 	}
 
 	return groupRatioInfo

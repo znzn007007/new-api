@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/samber/lo"
 	"gorm.io/gorm"
@@ -58,14 +59,36 @@ func GetAllEnableAbilities() []Ability {
 	return abilities
 }
 
-func getPriority(group string, model string, retry int) (int, error) {
+func getEnabledTagsByGroupModelDB(group string, model string) []string {
+	var tags []string
+	query := DB.Model(&Ability{}).
+		Where(commonGroupCol+" = ? and model = ? and enabled = ? and tag IS NOT NULL and tag <> ''", group, model, true).
+		Distinct("tag")
+	if err := query.Pluck("tag", &tags).Error; err == nil && len(tags) > 0 {
+		return tags
+	}
+	normalizedModel := ratio_setting.FormatMatchingModelName(model)
+	if normalizedModel == "" || normalizedModel == model {
+		return []string{}
+	}
+	tags = nil
+	_ = DB.Model(&Ability{}).
+		Where(commonGroupCol+" = ? and model = ? and enabled = ? and tag IS NOT NULL and tag <> ''", group, normalizedModel, true).
+		Distinct("tag").
+		Pluck("tag", &tags).Error
+	return tags
+}
+
+func getPriority(group string, model string, tag string, retry int) (int, error) {
 
 	var priorities []int
-	err := DB.Model(&Ability{}).
+	query := DB.Model(&Ability{}).
 		Select("DISTINCT(priority)").
-		Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true).
-		Order("priority DESC").              // 按优先级降序排序
-		Pluck("priority", &priorities).Error // Pluck用于将查询的结果直接扫描到一个切片中
+		Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true)
+	if tag != "" {
+		query = query.Where("tag = ?", tag)
+	}
+	err := query.Order("priority DESC").Pluck("priority", &priorities).Error
 
 	if err != nil {
 		// 处理错误
@@ -88,26 +111,36 @@ func getPriority(group string, model string, retry int) (int, error) {
 	return priorityToUse, nil
 }
 
-func getChannelQuery(group string, model string, retry int) (*gorm.DB, error) {
-	maxPrioritySubQuery := DB.Model(&Ability{}).Select("MAX(priority)").Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true)
+func getChannelQuery(group string, model string, tag string, retry int) (*gorm.DB, error) {
+	baseQuery := DB.Model(&Ability{}).Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true)
+	if tag != "" {
+		baseQuery = baseQuery.Where("tag = ?", tag)
+	}
+	maxPrioritySubQuery := baseQuery.Select("MAX(priority)")
 	channelQuery := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ? and priority = (?)", group, model, true, maxPrioritySubQuery)
+	if tag != "" {
+		channelQuery = channelQuery.Where("tag = ?", tag)
+	}
 	if retry != 0 {
-		priority, err := getPriority(group, model, retry)
+		priority, err := getPriority(group, model, tag, retry)
 		if err != nil {
 			return nil, err
 		} else {
 			channelQuery = DB.Where(commonGroupCol+" = ? and model = ? and enabled = ? and priority = ?", group, model, true, priority)
+			if tag != "" {
+				channelQuery = channelQuery.Where("tag = ?", tag)
+			}
 		}
 	}
 
 	return channelQuery, nil
 }
 
-func GetChannel(group string, model string, retry int) (*Channel, error) {
+func GetChannel(group string, model string, tag string, retry int) (*Channel, error) {
 	var abilities []Ability
 
 	var err error = nil
-	channelQuery, err := getChannelQuery(group, model, retry)
+	channelQuery, err := getChannelQuery(group, model, tag, retry)
 	if err != nil {
 		return nil, err
 	}
