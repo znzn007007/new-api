@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -67,7 +68,7 @@ func GetRandomSatisfiedChannelByResolution(group string, modelName string, resol
 }
 
 func IsChannelEnabledForResolution(group string, modelName string, resolution *GroupBillingResolution, channelID int) bool {
-	if resolution != nil && resolution.RouteTagStrict {
+	if resolution != nil && resolution.RouteTag != "" {
 		if !hasRouteTagCandidate(group, modelName, resolution) {
 			return false
 		}
@@ -122,6 +123,9 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			return nil, selectGroup, errors.New("auto groups is not enabled")
 		}
 		autoGroups := GetUserAutoGroup(userGroup)
+		var lastResolutionErr error
+		lastResolutionGroup := ""
+		resolvedAnyGroup := false
 
 		// startGroupIndex: the group index to start searching from
 		// startGroupIndex: 开始搜索的分组索引
@@ -138,8 +142,12 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			autoGroup := autoGroups[i]
 			resolution, resolveErr := ResolveAndApplyGroupBilling(param.Ctx, autoGroup, param.ModelName)
 			if resolveErr != nil {
-				return nil, autoGroup, resolveErr
+				lastResolutionErr = resolveErr
+				lastResolutionGroup = autoGroup
+				logger.LogWarn(param.Ctx, fmt.Sprintf("Skip auto group %s for model %s: %s", autoGroup, param.ModelName, resolveErr.Error()))
+				continue
 			}
+			resolvedAnyGroup = true
 			// Calculate priorityRetry for current group
 			// 计算当前分组的 priorityRetry
 			priorityRetry := param.GetRetry()
@@ -186,6 +194,9 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 				common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex, i)
 			}
 			break
+		}
+		if channel == nil && !resolvedAnyGroup && lastResolutionErr != nil {
+			return nil, lastResolutionGroup, lastResolutionErr
 		}
 	} else {
 		resolution, resolveErr := ResolveAndApplyGroupBilling(param.Ctx, param.TokenGroup, param.ModelName)

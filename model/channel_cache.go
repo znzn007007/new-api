@@ -14,7 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
 
-var group2model2channels map[string]map[string][]int           // enabled channel
+var group2model2channels map[string]map[string][]int // enabled channel
 var group2model2tag2channels map[string]map[string]map[string][]int
 var channelsIDM map[int]*Channel // all channels include disabled
 var channelSyncLock sync.RWMutex
@@ -306,16 +306,33 @@ func CacheUpdateChannelStatus(id int, status int) {
 		// delete the channel from group2model2channels
 		for group, model2channels := range group2model2channels {
 			for model, channels := range model2channels {
-				for i, channelId := range channels {
-					if channelId == id {
-						// remove the channel from the slice
-						group2model2channels[group][model] = append(channels[:i], channels[i+1:]...)
-						break
-					}
+				group2model2channels[group][model] = removeChannelIDFromSlice(channels, id)
+			}
+		}
+		for group, model2tag2channels := range group2model2tag2channels {
+			for model, tag2channels := range model2tag2channels {
+				for tag, channels := range tag2channels {
+					group2model2tag2channels[group][model][tag] = removeChannelIDFromSlice(channels, id)
 				}
 			}
 		}
 	}
+}
+
+func removeChannelIDFromSlice(channels []int, channelID int) []int {
+	if len(channels) == 0 {
+		return channels
+	}
+	filtered := channels[:0]
+	for _, id := range channels {
+		if id != channelID {
+			filtered = append(filtered, id)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
 }
 
 func CacheUpdateChannel(channel *Channel) {

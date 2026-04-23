@@ -2,10 +2,15 @@ package service
 
 import (
 	"fmt"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
 
@@ -117,12 +122,88 @@ func TestIsChannelEnabledForResolutionAllowsGeneralFallbackWhenNonStrict(t *test
 	model.InitChannelCache()
 
 	nonStrict := &GroupBillingResolution{RouteTag: "GPT", RouteTagStrict: false}
-	if !IsChannelEnabledForResolution("ask-public", "shared-model", nonStrict, 1) {
-		t.Fatalf("expected non-strict resolution to accept general fallback channel")
+	if IsChannelEnabledForResolution("ask-public", "shared-model", nonStrict, 1) {
+		t.Fatalf("expected affinity validation to reject non-tagged channel when route tag is resolved")
 	}
 
 	strict := &GroupBillingResolution{RouteTag: "GPT", RouteTagStrict: true}
 	if IsChannelEnabledForResolution("ask-public", "shared-model", strict, 1) {
 		t.Fatalf("expected strict resolution to reject untagged general channel")
+	}
+}
+
+func withAutoGroupSettingsReset(t *testing.T) {
+	t.Helper()
+	originalAutoGroups := setting.AutoGroups2JsonString()
+	originalUserUsableGroups := setting.UserUsableGroups2JSONString()
+	t.Cleanup(func() {
+		_ = setting.UpdateAutoGroupsByJsonString(originalAutoGroups)
+		_ = setting.UpdateUserUsableGroupsByJSONString(originalUserUsableGroups)
+	})
+}
+
+func TestCacheGetRandomSatisfiedChannelAutoSkipsBrokenOverrideGroup(t *testing.T) {
+	db := setupGroupTagResolverTestDB(t)
+	withResolverSettingsReset(t)
+	withAutoGroupSettingsReset(t)
+
+	seedGroupTagResolverChannelWithPriority(t, db, 2, "vip", "shared-model", "", 0)
+	model.InitChannelCache()
+
+	if err := ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"vip":1}`); err != nil {
+		t.Fatalf("failed to seed group ratio: %v", err)
+	}
+	if err := ratio_setting.UpdatePublicGroupModelTagOverrideByJSONString(`{"default":{"shared-model":"GPT"}}`); err != nil {
+		t.Fatalf("failed to seed model-tag override: %v", err)
+	}
+	if err := setting.UpdateAutoGroupsByJsonString(`["default","vip"]`); err != nil {
+		t.Fatalf("failed to seed auto groups: %v", err)
+	}
+	if err := setting.UpdateUserUsableGroupsByJSONString(`{"default":"默认分组","vip":"vip分组"}`); err != nil {
+		t.Fatalf("failed to seed usable groups: %v", err)
+	}
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	common.SetContextKey(ctx, constant.ContextKeyUserGroup, "default")
+
+	channel, selectGroup, err := CacheGetRandomSatisfiedChannel(&RetryParam{
+		Ctx:        ctx,
+		TokenGroup: "auto",
+		ModelName:  "shared-model",
+		Retry:      common.GetPointer(0),
+	})
+	if err != nil {
+		t.Fatalf("expected auto group selection to continue past broken override, got error: %v", err)
+	}
+	if selectGroup != "vip" {
+		t.Fatalf("expected auto group selection to fall through to vip, got %q", selectGroup)
+	}
+	if channel == nil || channel.Id != 2 {
+		t.Fatalf("expected fallback group to return vip channel 2, got %#v", channel)
+	}
+}
+
+func TestCacheUpdateChannelStatusRemovesTaggedChannelFromCache(t *testing.T) {
+	db := setupGroupTagResolverTestDB(t)
+	withResolverSettingsReset(t)
+
+	seedGroupTagResolverChannelWithPriority(t, db, 1, "ask-public", "shared-model", "GPT", 0)
+	model.InitChannelCache()
+
+	if !model.IsChannelEnabledForGroupModelTag("ask-public", "shared-model", "GPT", 1) {
+		t.Fatalf("expected tagged channel to be enabled before cache update")
+	}
+
+	model.CacheUpdateChannelStatus(1, common.ChannelStatusAutoDisabled)
+
+	if model.IsChannelEnabledForGroupModelTag("ask-public", "shared-model", "GPT", 1) {
+		t.Fatalf("expected disabled tagged channel to be removed from tag cache")
+	}
+	channel, err := model.GetRandomSatisfiedChannel("ask-public", "shared-model", "GPT", 0)
+	if err != nil {
+		t.Fatalf("expected no error after removing tagged channel from cache, got %v", err)
+	}
+	if channel != nil {
+		t.Fatalf("expected tagged selection to return nil after cache removal, got %#v", channel)
 	}
 }

@@ -69,6 +69,7 @@ function GroupSection({
   items,
   onUpdate,
   onRemove,
+  onRemoveMany,
   onAdd,
   t,
 }) {
@@ -91,11 +92,20 @@ function GroupSection({
         onClick={() => setOpen(!open)}
       >
         <div className='flex items-center gap-2'>
-          {open ? <IconChevronUp size='small' /> : <IconChevronDown size='small' />}
+          {open ? (
+            <IconChevronUp size='small' />
+          ) : (
+            <IconChevronDown size='small' />
+          )}
           <Text strong>{groupName}</Text>
-          <Tag size='small' color='blue'>{items.length} {t('条规则')}</Tag>
+          <Tag size='small' color='blue'>
+            {items.length} {t('条规则')}
+          </Tag>
         </div>
-        <div className='flex items-center gap-1' onClick={(e) => e.stopPropagation()}>
+        <div
+          className='flex items-center gap-1'
+          onClick={(e) => e.stopPropagation()}
+        >
           <Button
             icon={<IconPlus />}
             size='small'
@@ -104,7 +114,7 @@ function GroupSection({
           />
           <Popconfirm
             title={t('确认删除该分组的所有规则？')}
-            onConfirm={() => items.forEach((item) => onRemove(item._id))}
+            onConfirm={() => onRemoveMany(items.map((item) => item._id))}
             position='left'
           >
             <Button
@@ -178,7 +188,9 @@ export default function PublicGroupTagRatioRules({
 
   const updateRule = useCallback(
     (id, field, value) => {
-      emitChange(rules.map((r) => (r._id === id ? { ...r, [field]: value } : r)));
+      emitChange(
+        rules.map((r) => (r._id === id ? { ...r, [field]: value } : r)),
+      );
     },
     [rules, emitChange],
   );
@@ -186,6 +198,15 @@ export default function PublicGroupTagRatioRules({
   const removeRule = useCallback(
     (id) => {
       emitChange(rules.filter((r) => r._id !== id));
+    },
+    [rules, emitChange],
+  );
+
+  const removeRules = useCallback(
+    (ids) => {
+      if (!ids.length) return;
+      const idSet = new Set(ids);
+      emitChange(rules.filter((r) => !idSet.has(r._id)));
     },
     [rules, emitChange],
   );
@@ -264,6 +285,7 @@ export default function PublicGroupTagRatioRules({
           items={group.items}
           onUpdate={updateRule}
           onRemove={removeRule}
+          onRemoveMany={removeRules}
           onAdd={addRuleToGroup}
           t={t}
         />
