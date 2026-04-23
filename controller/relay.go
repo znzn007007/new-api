@@ -31,6 +31,27 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+func prepareRelayFirstAttempt(
+	c *gin.Context,
+	info *relaycommon.RelayInfo,
+	retryParam *service.RetryParam,
+	promptTokens int,
+	meta *types.TokenCountMeta,
+) (*model.Channel, types.PriceData, *types.NewAPIError) {
+	channel, channelErr := getChannel(c, info, retryParam)
+	if channelErr != nil {
+		logger.LogError(c, channelErr.Error())
+		return nil, types.PriceData{}, channelErr
+	}
+
+	priceData, err := helper.ModelPriceHelper(c, info, promptTokens, meta)
+	if err != nil {
+		return nil, types.PriceData{}, types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithStatusCode(http.StatusBadRequest))
+	}
+
+	return channel, priceData, nil
+}
+
 func relayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
 	var err *types.NewAPIError
 	switch info.RelayMode {
@@ -149,9 +170,18 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	relayInfo.SetEstimatePromptTokens(tokens)
 
-	priceData, err := helper.ModelPriceHelper(c, relayInfo, tokens, meta)
-	if err != nil {
-		newAPIError = types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithStatusCode(http.StatusBadRequest))
+	retryParam := &service.RetryParam{
+		Ctx:        c,
+		TokenGroup: relayInfo.TokenGroup,
+		ModelName:  relayInfo.OriginModelName,
+		Retry:      common.GetPointer(0),
+	}
+	relayInfo.RetryIndex = 0
+	relayInfo.LastError = nil
+
+	initialChannel, priceData, prepareErr := prepareRelayFirstAttempt(c, relayInfo, retryParam, tokens, meta)
+	if prepareErr != nil {
+		newAPIError = prepareErr
 		return
 	}
 
@@ -177,22 +207,18 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 	}()
 
-	retryParam := &service.RetryParam{
-		Ctx:        c,
-		TokenGroup: relayInfo.TokenGroup,
-		ModelName:  relayInfo.OriginModelName,
-		Retry:      common.GetPointer(0),
-	}
-	relayInfo.RetryIndex = 0
-	relayInfo.LastError = nil
-
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
 		relayInfo.RetryIndex = retryParam.GetRetry()
-		channel, channelErr := getChannel(c, relayInfo, retryParam)
-		if channelErr != nil {
-			logger.LogError(c, channelErr.Error())
-			newAPIError = channelErr
-			break
+		channel := initialChannel
+		initialChannel = nil
+		if channel == nil {
+			var channelErr *types.NewAPIError
+			channel, channelErr = getChannel(c, relayInfo, retryParam)
+			if channelErr != nil {
+				logger.LogError(c, channelErr.Error())
+				newAPIError = channelErr
+				break
+			}
 		}
 
 		addUsedChannel(c, channel.Id)
