@@ -108,6 +108,12 @@ func TestResolveGroupBillingOverrideWins(t *testing.T) {
 	if resolution.MatchedTag != "GPT" {
 		t.Fatalf("expected override tag GPT, got %q", resolution.MatchedTag)
 	}
+	if resolution.RouteTag != "GPT" {
+		t.Fatalf("expected route tag GPT, got %q", resolution.RouteTag)
+	}
+	if !resolution.RouteTagStrict {
+		t.Fatalf("expected override route to be strict")
+	}
 	if !resolution.ResolvedByOverride {
 		t.Fatalf("expected resolution to be marked as override")
 	}
@@ -133,6 +139,12 @@ func TestResolveGroupBillingAutoDerivesUniqueTagAndRatio(t *testing.T) {
 	}
 	if resolution.MatchedTag != "Claude 第三方" {
 		t.Fatalf("expected resolved tag Claude 第三方, got %q", resolution.MatchedTag)
+	}
+	if resolution.RouteTag != "Claude 第三方" {
+		t.Fatalf("expected route tag Claude 第三方, got %q", resolution.RouteTag)
+	}
+	if resolution.RouteTagStrict {
+		t.Fatalf("expected inferred route tag to be non-strict")
 	}
 	if resolution.EffectiveRatio != 1.8 {
 		t.Fatalf("expected effective ratio 1.8, got %v", resolution.EffectiveRatio)
@@ -160,6 +172,12 @@ func TestResolveGroupBillingFallsBackWhenNoTagExists(t *testing.T) {
 	if resolution.MatchedTag != "" {
 		t.Fatalf("expected no resolved tag, got %q", resolution.MatchedTag)
 	}
+	if resolution.RouteTag != "" {
+		t.Fatalf("expected no route tag, got %q", resolution.RouteTag)
+	}
+	if resolution.RouteTagStrict {
+		t.Fatalf("expected route tag to be non-strict")
+	}
 	if resolution.EffectiveRatio != 1.25 {
 		t.Fatalf("expected fallback ratio 1.25, got %v", resolution.EffectiveRatio)
 	}
@@ -168,7 +186,7 @@ func TestResolveGroupBillingFallsBackWhenNoTagExists(t *testing.T) {
 	}
 }
 
-func TestResolveGroupBillingRejectsAmbiguousTags(t *testing.T) {
+func TestResolveGroupBillingLeavesAmbiguousTagsUnlocked(t *testing.T) {
 	db := setupGroupTagResolverTestDB(t)
 	withResolverSettingsReset(t)
 
@@ -180,8 +198,37 @@ func TestResolveGroupBillingRejectsAmbiguousTags(t *testing.T) {
 		t.Fatalf("failed to seed group ratio: %v", err)
 	}
 
-	_, err := ResolveGroupBilling("ask-public", "default", "ambiguous-model")
+	resolution, err := ResolveGroupBilling("ask-public", "default", "ambiguous-model")
+	if err != nil {
+		t.Fatalf("expected ambiguous tag resolution to fall back, got error: %v", err)
+	}
+	if resolution.MatchedTag != "" {
+		t.Fatalf("expected no billing tag for ambiguous routing, got %q", resolution.MatchedTag)
+	}
+	if resolution.RouteTag != "" {
+		t.Fatalf("expected no route tag for ambiguous routing, got %q", resolution.RouteTag)
+	}
+	if resolution.RouteTagStrict {
+		t.Fatalf("expected ambiguous routing to stay non-strict")
+	}
+}
+
+func TestResolveGroupBillingRejectsMissingOverrideTag(t *testing.T) {
+	db := setupGroupTagResolverTestDB(t)
+	withResolverSettingsReset(t)
+
+	seedGroupTagResolverChannel(t, db, 1, "ask-public", "shared-model", "GPT")
+	model.InitChannelCache()
+
+	if err := ratio_setting.UpdateGroupRatioByJSONString(`{"ask-public":1}`); err != nil {
+		t.Fatalf("failed to seed group ratio: %v", err)
+	}
+	if err := ratio_setting.UpdatePublicGroupModelTagOverrideByJSONString(`{"ask-public":{"shared-model":"Claude Code"}}`); err != nil {
+		t.Fatalf("failed to seed model-tag override: %v", err)
+	}
+
+	_, err := ResolveGroupBilling("ask-public", "default", "shared-model")
 	if err == nil {
-		t.Fatalf("expected ambiguous tag resolution to fail")
+		t.Fatalf("expected missing override tag to fail")
 	}
 }

@@ -15,7 +15,6 @@ type RetryParam struct {
 	Ctx          *gin.Context
 	TokenGroup   string
 	ModelName    string
-	ResolvedTag  string
 	Retry        *int
 	resetNextTry bool
 }
@@ -44,6 +43,37 @@ func (p *RetryParam) IncreaseRetry() {
 
 func (p *RetryParam) ResetRetryNextTry() {
 	p.resetNextTry = true
+}
+
+func hasRouteTagCandidate(group string, modelName string, resolution *GroupBillingResolution) bool {
+	return resolution != nil &&
+		resolution.RouteTag != "" &&
+		common.StringsContains(model.GetEnabledTagsByGroupModel(group, modelName), resolution.RouteTag)
+}
+
+func GetRandomSatisfiedChannelByResolution(group string, modelName string, resolution *GroupBillingResolution, retry int) (*model.Channel, error) {
+	if hasRouteTagCandidate(group, modelName, resolution) {
+		channel, err := model.GetRandomSatisfiedChannel(group, modelName, resolution.RouteTag, retry)
+		if err != nil {
+			return nil, err
+		}
+		if channel != nil || resolution.RouteTagStrict {
+			return channel, nil
+		}
+	} else if resolution != nil && resolution.RouteTagStrict {
+		return nil, nil
+	}
+	return model.GetRandomSatisfiedChannel(group, modelName, "", retry)
+}
+
+func IsChannelEnabledForResolution(group string, modelName string, resolution *GroupBillingResolution, channelID int) bool {
+	if resolution != nil && resolution.RouteTagStrict {
+		if !hasRouteTagCandidate(group, modelName, resolution) {
+			return false
+		}
+		return model.IsChannelEnabledForGroupModelTag(group, modelName, resolution.RouteTag, channelID)
+	}
+	return model.IsChannelEnabledForGroupModel(group, modelName, channelID)
 }
 
 // CacheGetRandomSatisfiedChannel tries to get a random channel that satisfies the requirements.
@@ -120,7 +150,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			}
 			logger.LogDebug(param.Ctx, "Auto selecting group: %s, priorityRetry: %d", autoGroup, priorityRetry)
 
-			channel, _ = model.GetRandomSatisfiedChannel(autoGroup, param.ModelName, resolution.MatchedTag, priorityRetry)
+			channel, _ = GetRandomSatisfiedChannelByResolution(autoGroup, param.ModelName, resolution, priorityRetry)
 			if channel == nil {
 				// Current group has no available channel for this model, try next group
 				// 当前分组没有该模型的可用渠道，尝试下一个分组
@@ -162,8 +192,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 		if resolveErr != nil {
 			return nil, param.TokenGroup, resolveErr
 		}
-		param.ResolvedTag = resolution.MatchedTag
-		channel, err = model.GetRandomSatisfiedChannel(param.TokenGroup, param.ModelName, param.ResolvedTag, param.GetRetry())
+		channel, err = GetRandomSatisfiedChannelByResolution(param.TokenGroup, param.ModelName, resolution, param.GetRetry())
 		if err != nil {
 			return nil, param.TokenGroup, err
 		}

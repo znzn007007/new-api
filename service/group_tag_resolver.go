@@ -1,9 +1,7 @@
 package service
 
 import (
-	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -13,17 +11,19 @@ import (
 )
 
 type GroupBillingResolution struct {
-	PublicGroup         string
-	UserGroup           string
-	ModelName           string
-	MatchedTag          string
-	BillingAttribution  string
-	EffectiveRatio      float64
-	GroupFallbackRatio  float64
-	BillingRatioSource  string
+	PublicGroup          string
+	UserGroup            string
+	ModelName            string
+	MatchedTag           string
+	RouteTag             string
+	RouteTagStrict       bool
+	BillingAttribution   string
+	EffectiveRatio       float64
+	GroupFallbackRatio   float64
+	BillingRatioSource   string
 	BillingRatioFallback bool
-	UsedGroupSpecial    bool
-	ResolvedByOverride  bool
+	UsedGroupSpecial     bool
+	ResolvedByOverride   bool
 }
 
 func resolveGroupFallbackRatio(userGroup, publicGroup string) (float64, bool) {
@@ -49,15 +49,15 @@ func resolveConfiguredModelTag(publicGroup, modelName string) (string, bool) {
 func ResolveGroupBilling(publicGroup, userGroup, modelName string) (*GroupBillingResolution, error) {
 	fallbackRatio, usedGroupSpecial := resolveGroupFallbackRatio(userGroup, publicGroup)
 	resolution := &GroupBillingResolution{
-		PublicGroup:         publicGroup,
-		UserGroup:           userGroup,
-		ModelName:           modelName,
-		BillingAttribution:  publicGroup,
-		EffectiveRatio:      fallbackRatio,
-		GroupFallbackRatio:  fallbackRatio,
-		BillingRatioSource:  "public_group_default",
+		PublicGroup:          publicGroup,
+		UserGroup:            userGroup,
+		ModelName:            modelName,
+		BillingAttribution:   publicGroup,
+		EffectiveRatio:       fallbackRatio,
+		GroupFallbackRatio:   fallbackRatio,
+		BillingRatioSource:   "public_group_default",
 		BillingRatioFallback: true,
-		UsedGroupSpecial:    usedGroupSpecial,
+		UsedGroupSpecial:     usedGroupSpecial,
 	}
 	if usedGroupSpecial {
 		resolution.BillingRatioSource = "public_group_special"
@@ -74,6 +74,8 @@ func ResolveGroupBilling(publicGroup, userGroup, modelName string) (*GroupBillin
 			return nil, fmt.Errorf("configured channel tag %q is unavailable for group %q model %q", overrideTag, publicGroup, modelName)
 		}
 		resolution.MatchedTag = overrideTag
+		resolution.RouteTag = overrideTag
+		resolution.RouteTagStrict = true
 		resolution.BillingAttribution = overrideTag
 		resolution.ResolvedByOverride = true
 	} else {
@@ -82,9 +84,8 @@ func ResolveGroupBilling(publicGroup, userGroup, modelName string) (*GroupBillin
 			return resolution, nil
 		case 1:
 			resolution.MatchedTag = tags[0]
+			resolution.RouteTag = tags[0]
 			resolution.BillingAttribution = tags[0]
-		default:
-			return nil, fmt.Errorf("%w: group %q model %q matched multiple channel tags: %s", errors.New("ambiguous channel tag resolution"), publicGroup, modelName, strings.Join(tags, ", "))
 		}
 	}
 

@@ -115,7 +115,7 @@ func Distribute() func(c *gin.Context) {
 								if resolveErr != nil {
 									continue
 								}
-								if model.IsChannelEnabledForGroupModelTag(g, modelRequest.Model, resolution.MatchedTag, preferred.Id) {
+								if service.IsChannelEnabledForResolution(g, modelRequest.Model, resolution, preferred.Id) {
 									selectGroup = g
 									common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
 									channel = preferred
@@ -125,11 +125,11 @@ func Distribute() func(c *gin.Context) {
 							}
 						} else {
 							resolution, resolveErr := service.ResolveAndApplyGroupBilling(c, usingGroup, modelRequest.Model)
-							if resolveErr == nil && model.IsChannelEnabledForGroupModelTag(usingGroup, modelRequest.Model, resolution.MatchedTag, preferred.Id) {
-							channel = preferred
-							selectGroup = usingGroup
-							service.MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
-						}
+							if resolveErr == nil && service.IsChannelEnabledForResolution(usingGroup, modelRequest.Model, resolution, preferred.Id) {
+								channel = preferred
+								selectGroup = usingGroup
+								service.MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
+							}
 						}
 					}
 				}
