@@ -1,6 +1,7 @@
 ---
 title: Public group based billing split requires code changes in current new-api flow
 date: 2026-04-22
+last_updated: 2026-04-23
 category: best-practices
 module: group billing and request routing
 problem_type: best_practice
@@ -10,6 +11,7 @@ applies_when:
   - You want users to see only a small set of public groups, but billing must split into more internal groups
   - Nginx or another gateway sits in front of new-api and must decide routing before new-api middleware runs
   - The same public group needs different effective billing behavior based on model family or request type
+  - You are implementing tag-aware billing resolution after authentication but before final channel selection
 tags: [new-api, group-routing, billing, nginx, token-group, internal-groups]
 ---
 
@@ -30,6 +32,8 @@ But the actual billing model is finer-grained:
 - Claude Code traffic
 
 At first glance, this seems solvable with hidden groups plus Nginx pre-routing. After checking the code path, that is not sufficient by itself.
+
+Later implementation and review work added an important second lesson: **even after adding code-level public-group → tag billing resolution, the new layer must preserve old routing fallback behavior and billing consistency.** A tag-aware split that narrows routing too early or lets retry-time billing diverge from pre-consume billing will regress existing traffic.
 
 ## Guidance
 In the current new-api design, the user-selected group is resolved inside the service after token authentication, not at the gateway boundary.
@@ -55,6 +59,22 @@ So under the current constraints, there are only two realistic directions:
 
 If you do not want to change the external client contract, then code changes are the correct path.
 
+But those code changes need tighter guardrails than “resolve one tag, then hard-filter channels by that tag.” The safer mental model is:
+
+1. **Public group remains the user-facing truth**
+2. **Tag resolution provides billing attribution and preferred routing context**
+3. **Selection must preserve legitimate fallback capacity unless the operator explicitly forces a hard route**
+4. **Pre-consume, retry, realtime billing, logs, and pricing display must all share the same effective multiplier decision**
+
+In practice, that means:
+
+- An explicit `public group + model -> tag` override may justify hard selection, because the operator asked for it
+- Automatic inference should be treated more cautiously:
+  - if it is ambiguous, do not fail a request that used to be routable
+  - if there is one tagged pool plus untagged fallback channels, do not make the untagged fallback unreachable unless that behavior is explicitly intended
+- Retry-time routing changes must not silently increase final settlement beyond what was admitted at pre-consume time
+- A resolved ratio of `0` is a valid business decision (free route), not a missing value
+
 ## Why This Matters
 Without writing this down, it is easy to spend time trying combinations of:
 
@@ -71,6 +91,16 @@ The core reason is architectural timing:
 - **Nginx runs before new-api knows the token-selected group**
 - **new-api pricing and channel decisions happen after auth populates the internal using-group context**
 
+Once you move the split inside new-api, the next risk is **architectural coupling**:
+
+- If tag resolution is treated as both attribution and mandatory hard route selection, you can accidentally remove fallback channels that kept the old system healthy
+- If settlement uses a fresher effective ratio than pre-consume or admission checks, billing becomes internally inconsistent
+- If `0` is treated as “unset,” free routes stop being free in some code paths
+
+So the implementation bar is not just “support public-group + tag rules.” It is:
+
+> **support public-group + tag rules without making routing stricter than intended or letting effective billing drift across code paths**
+
 So the requirement is not just “add more groups.” It is really “support public-group to internal-billing-group remapping at the correct stage of the request lifecycle.”
 
 Recognizing that early prevents dead-end configuration work and makes the design discussion cleaner.
@@ -80,6 +110,7 @@ Recognizing that early prevents dead-end configuration work and makes the design
 - Internal billing behavior depends on model family, request type, or client type
 - The gateway cannot infer the correct internal lane from path, host, header, or another request-visible signal alone
 - You want to keep the current public UX but refine internal accounting
+- You are adding tag-aware billing while still needing old fallback channels and retry behavior to remain safe
 
 ## Examples
 ### Example: why pure hidden-group config is not enough
@@ -105,9 +136,41 @@ A small internal remap layer can work like this:
 
 That keeps the public UX stable while letting billing and channel routing use more precise internal groups.
 
+### Example: what not to do after adding tag-aware resolution
+Suppose `ask-第三方渠道 + claude-3-7-sonnet` currently has:
+
+- one tagged pool: `Claude 第三方`
+- one untagged fallback pool
+
+If automatic inference sees only one non-empty tag and then hard-filters selection to that tag, the untagged fallback disappears. Traffic will now fail as soon as the tagged pool is degraded, even though the old system could still route successfully.
+
+The safer approach is:
+
+- use `Claude 第三方` as billing attribution and preferred routing signal
+- preserve the untagged fallback unless an operator-configured override says this model must only use that tag
+
+### Example: retry-time billing drift
+If the first attempt pre-consumes quota using a cheaper effective multiplier, but retry lands on a different public group or tag with a higher multiplier, final settlement can exceed what the request was admitted for.
+
+Avoid this by treating **effective billing resolution as a shared decision artifact** reused by:
+
+- pre-consume checks
+- retry path updates
+- final settlement
+- pricing API output
+- log rendering
+
+### Example: free route handling
+If a tag-specific ratio is intentionally `0`, realtime and WebSocket paths must preserve that literal `0`. A `0` multiplier means “free,” not “missing, fall back to default group ratio.”
+
 ## Related
 - `docs/solutions/best-practices/header-based-cc-routing-with-single-key-2026-04-22.md` — documents the earlier no-source-change gateway routing idea and its limits
+- `docs/reports/2026-04-23-public-group-billing-split-review-report.md` — records the concrete regressions found when the first tag-aware implementation narrowed routing or billing too aggressively
 - Relevant code path:
   - `middleware/auth.go`
   - `middleware/distributor.go`
   - `model/token.go`
+  - `service/group_tag_resolver.go`
+  - `service/channel_select.go`
+  - `relay/helper/price.go`
+  - `service/quota.go`
