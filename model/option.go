@@ -147,6 +147,8 @@ func InitOptionMap() {
 	common.OptionMap["CreateCacheRatio"] = ratio_setting.CreateCacheRatio2JSONString()
 	common.OptionMap["GroupRatio"] = ratio_setting.GroupRatio2JSONString()
 	common.OptionMap["GroupGroupRatio"] = ratio_setting.GroupGroupRatio2JSONString()
+	common.OptionMap["group_ratio_setting.public_group_tag_ratio"] = ratio_setting.PublicGroupTagRatio2JSONString()
+	common.OptionMap["group_ratio_setting.public_group_model_tag"] = ratio_setting.PublicGroupModelTagOverride2JSONString()
 	common.OptionMap["UserUsableGroups"] = setting.UserUsableGroups2JSONString()
 	common.OptionMap["CompletionRatio"] = ratio_setting.CompletionRatio2JSONString()
 	common.OptionMap["ImageRatio"] = ratio_setting.ImageRatio2JSONString()
@@ -577,6 +579,9 @@ func handleConfigUpdate(key, value string) bool {
 	if configName == "performance_setting" {
 		// 同步磁盘缓存配置到 common 包
 		performance_setting.UpdateAndSync()
+	}
+	if configName == "group_ratio_setting" && (configKey == "public_group_tag_ratio" || configKey == "public_group_model_tag") {
+		RefreshPricing()
 	}
 
 	return true // 已处理

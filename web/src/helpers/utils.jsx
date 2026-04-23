@@ -618,9 +618,16 @@ export const calculateModelPrice = ({
   quotaDisplayType = 'USD',
   precision = 4,
 }) => {
+  const effectiveGroupPricing = record?.effective_group_pricing || {};
+  const getEffectiveGroupEntry = (group) => effectiveGroupPricing[group] || null;
+
   // 1. 选择实际使用的分组
   let usedGroup = selectedGroup;
-  let usedGroupRatio = groupRatio[selectedGroup];
+  let usedGroupEntry = getEffectiveGroupEntry(selectedGroup);
+  let usedGroupRatio =
+    usedGroupEntry?.ratio !== undefined
+      ? usedGroupEntry.ratio
+      : groupRatio[selectedGroup];
 
   if (selectedGroup === 'all' || usedGroupRatio === undefined) {
     // 在模型可用分组中选择倍率最小的分组，若无则使用 1
@@ -630,10 +637,12 @@ export const calculateModelPrice = ({
       record.enable_groups.length > 0
     ) {
       record.enable_groups.forEach((g) => {
-        const r = groupRatio[g];
+        const entry = getEffectiveGroupEntry(g);
+        const r = entry?.ratio !== undefined ? entry.ratio : groupRatio[g];
         if (r !== undefined && r < minRatio) {
           minRatio = r;
           usedGroup = g;
+          usedGroupEntry = entry;
           usedGroupRatio = r;
         }
       });
@@ -643,6 +652,10 @@ export const calculateModelPrice = ({
     if (usedGroupRatio === undefined) {
       usedGroupRatio = 1;
     }
+  }
+
+  if (!usedGroupEntry && usedGroup) {
+    usedGroupEntry = getEffectiveGroupEntry(usedGroup);
   }
 
   // 2. 根据计费类型计算价格
@@ -674,6 +687,10 @@ export const calculateModelPrice = ({
         isTokensDisplay: true,
         usedGroup,
         usedGroupRatio,
+        billingAttribution: usedGroupEntry?.billing_attribution,
+        matchedTag: usedGroupEntry?.matched_tag,
+        billingRatioSource: usedGroupEntry?.billing_ratio_source,
+        billingRatioFallback: usedGroupEntry?.billing_ratio_fallback,
       };
     }
 
@@ -734,6 +751,10 @@ export const calculateModelPrice = ({
       isTokensDisplay: false,
       usedGroup,
       usedGroupRatio,
+      billingAttribution: usedGroupEntry?.billing_attribution,
+      matchedTag: usedGroupEntry?.matched_tag,
+      billingRatioSource: usedGroupEntry?.billing_ratio_source,
+      billingRatioFallback: usedGroupEntry?.billing_ratio_fallback,
     };
   }
 
@@ -748,6 +769,10 @@ export const calculateModelPrice = ({
       isTokensDisplay: false,
       usedGroup,
       usedGroupRatio,
+      billingAttribution: usedGroupEntry?.billing_attribution,
+      matchedTag: usedGroupEntry?.matched_tag,
+      billingRatioSource: usedGroupEntry?.billing_ratio_source,
+      billingRatioFallback: usedGroupEntry?.billing_ratio_fallback,
     };
   }
 
@@ -758,6 +783,10 @@ export const calculateModelPrice = ({
     isTokensDisplay: false,
     usedGroup,
     usedGroupRatio,
+    billingAttribution: usedGroupEntry?.billing_attribution,
+    matchedTag: usedGroupEntry?.matched_tag,
+    billingRatioSource: usedGroupEntry?.billing_ratio_source,
+    billingRatioFallback: usedGroupEntry?.billing_ratio_fallback,
   };
 };
 

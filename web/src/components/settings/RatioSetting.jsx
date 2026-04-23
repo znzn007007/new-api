@@ -28,26 +28,30 @@ import UpstreamRatioSync from '../../pages/Setting/Ratio/UpstreamRatioSync';
 
 import { API, showError, toBoolean } from '../../helpers';
 
+const DEFAULT_INPUTS = {
+  ModelPrice: '',
+  ModelRatio: '',
+  CacheRatio: '',
+  CreateCacheRatio: '',
+  CompletionRatio: '',
+  GroupRatio: '',
+  GroupGroupRatio: '',
+  ImageRatio: '',
+  AudioRatio: '',
+  AudioCompletionRatio: '',
+  AutoGroups: '',
+  DefaultUseAutoGroup: false,
+  ExposeRatioEnabled: false,
+  UserUsableGroups: '',
+  'group_ratio_setting.group_special_usable_group': '',
+  'group_ratio_setting.public_group_tag_ratio': '',
+  'group_ratio_setting.public_group_model_tag': '',
+};
+
 const RatioSetting = () => {
   const { t } = useTranslation();
 
-  let [inputs, setInputs] = useState({
-    ModelPrice: '',
-    ModelRatio: '',
-    CacheRatio: '',
-    CreateCacheRatio: '',
-    CompletionRatio: '',
-    GroupRatio: '',
-    GroupGroupRatio: '',
-    ImageRatio: '',
-    AudioRatio: '',
-    AudioCompletionRatio: '',
-    AutoGroups: '',
-    DefaultUseAutoGroup: false,
-    ExposeRatioEnabled: false,
-    UserUsableGroups: '',
-    'group_ratio_setting.group_special_usable_group': '',
-  });
+  let [inputs, setInputs] = useState(DEFAULT_INPUTS);
 
   const [loading, setLoading] = useState(false);
 
@@ -55,7 +59,7 @@ const RatioSetting = () => {
     const res = await API.get('/api/option/');
     const { success, message, data } = res.data;
     if (success) {
-      let newInputs = {};
+      let newInputs = { ...DEFAULT_INPUTS };
       data.forEach((item) => {
         if (item.value.startsWith('{') || item.value.startsWith('[')) {
           try {

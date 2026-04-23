@@ -14,8 +14,9 @@ import (
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
 
-var group2model2channels map[string]map[string][]int // enabled channel
-var channelsIDM map[int]*Channel                     // all channels include disabled
+var group2model2channels map[string]map[string][]int           // enabled channel
+var group2model2tag2channels map[string]map[string]map[string][]int
+var channelsIDM map[int]*Channel // all channels include disabled
 var channelSyncLock sync.RWMutex
 
 func InitChannelCache() {
@@ -35,8 +36,10 @@ func InitChannelCache() {
 		groups[ability.Group] = true
 	}
 	newGroup2model2channels := make(map[string]map[string][]int)
+	newGroup2model2tag2channels := make(map[string]map[string]map[string][]int)
 	for group := range groups {
 		newGroup2model2channels[group] = make(map[string][]int)
+		newGroup2model2tag2channels[group] = make(map[string]map[string][]int)
 	}
 	for _, channel := range channels {
 		if channel.Status != common.ChannelStatusEnabled {
@@ -50,6 +53,12 @@ func InitChannelCache() {
 					newGroup2model2channels[group][model] = make([]int, 0)
 				}
 				newGroup2model2channels[group][model] = append(newGroup2model2channels[group][model], channel.Id)
+				if channel.Tag != nil && *channel.Tag != "" {
+					if _, ok := newGroup2model2tag2channels[group][model]; !ok {
+						newGroup2model2tag2channels[group][model] = make(map[string][]int)
+					}
+					newGroup2model2tag2channels[group][model][*channel.Tag] = append(newGroup2model2tag2channels[group][model][*channel.Tag], channel.Id)
+				}
 			}
 		}
 	}
@@ -63,9 +72,20 @@ func InitChannelCache() {
 			newGroup2model2channels[group][model] = channels
 		}
 	}
+	for group, model2tag2channels := range newGroup2model2tag2channels {
+		for model, tag2channels := range model2tag2channels {
+			for tag, channels := range tag2channels {
+				sort.Slice(channels, func(i, j int) bool {
+					return newChannelId2channel[channels[i]].GetPriority() > newChannelId2channel[channels[j]].GetPriority()
+				})
+				newGroup2model2tag2channels[group][model][tag] = channels
+			}
+		}
+	}
 
 	channelSyncLock.Lock()
 	group2model2channels = newGroup2model2channels
+	group2model2tag2channels = newGroup2model2tag2channels
 	//channelsIDM = newChannelId2channel
 	for i, channel := range newChannelId2channel {
 		if channel.ChannelInfo.IsMultiKey {
@@ -93,23 +113,16 @@ func SyncChannelCache(frequency int) {
 	}
 }
 
-func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel, error) {
+func GetRandomSatisfiedChannel(group string, model string, tag string, retry int) (*Channel, error) {
 	// if memory cache is disabled, get channel directly from database
 	if !common.MemoryCacheEnabled {
-		return GetChannel(group, model, retry)
+		return GetChannel(group, model, tag, retry)
 	}
 
 	channelSyncLock.RLock()
 	defer channelSyncLock.RUnlock()
 
-	// First, try to find channels with the exact model name.
-	channels := group2model2channels[group][model]
-
-	// If no channels found, try to find channels with the normalized model name.
-	if len(channels) == 0 {
-		normalizedModel := ratio_setting.FormatMatchingModelName(model)
-		channels = group2model2channels[group][normalizedModel]
-	}
+	channels := getChannelsByGroupModelTagUnlocked(group, model, tag)
 
 	if len(channels) == 0 {
 		return nil, nil
@@ -188,6 +201,64 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	}
 	// return null if no channel is not found
 	return nil, errors.New("channel not found")
+}
+
+func GetEnabledTagsByGroupModel(group string, model string) []string {
+	if !common.MemoryCacheEnabled {
+		return getEnabledTagsByGroupModelDB(group, model)
+	}
+
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+
+	tag2channels := getTagChannelsByGroupModelUnlocked(group, model)
+	if len(tag2channels) == 0 {
+		return []string{}
+	}
+	tags := make([]string, 0, len(tag2channels))
+	for tag := range tag2channels {
+		if tag == "" {
+			continue
+		}
+		tags = append(tags, tag)
+	}
+	sort.Strings(tags)
+	return tags
+}
+
+func getTagChannelsByGroupModelUnlocked(group string, model string) map[string][]int {
+	if group2model2tag2channels == nil {
+		return nil
+	}
+	tagChannels := group2model2tag2channels[group][model]
+	if len(tagChannels) > 0 {
+		return tagChannels
+	}
+	normalizedModel := ratio_setting.FormatMatchingModelName(model)
+	if normalizedModel == "" || normalizedModel == model {
+		return nil
+	}
+	return group2model2tag2channels[group][normalizedModel]
+}
+
+func getChannelsByGroupModelTagUnlocked(group string, model string, tag string) []int {
+	if tag != "" {
+		tagChannels := getTagChannelsByGroupModelUnlocked(group, model)
+		if len(tagChannels) > 0 {
+			return tagChannels[tag]
+		}
+	}
+
+	channels := group2model2channels[group][model]
+	if len(channels) > 0 {
+		return channels
+	}
+
+	normalizedModel := ratio_setting.FormatMatchingModelName(model)
+	if normalizedModel == "" || normalizedModel == model {
+		return nil
+	}
+	return group2model2channels[group][normalizedModel]
 }
 
 func CacheGetChannel(id int) (*Channel, error) {

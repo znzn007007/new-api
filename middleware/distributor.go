@@ -111,7 +111,11 @@ func Distribute() func(c *gin.Context) {
 							userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
 							autoGroups := service.GetUserAutoGroup(userGroup)
 							for _, g := range autoGroups {
-								if model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) {
+								resolution, resolveErr := service.ResolveAndApplyGroupBilling(c, g, modelRequest.Model)
+								if resolveErr != nil {
+									continue
+								}
+								if model.IsChannelEnabledForGroupModelTag(g, modelRequest.Model, resolution.MatchedTag, preferred.Id) {
 									selectGroup = g
 									common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
 									channel = preferred
@@ -119,10 +123,13 @@ func Distribute() func(c *gin.Context) {
 									break
 								}
 							}
-						} else if model.IsChannelEnabledForGroupModel(usingGroup, modelRequest.Model, preferred.Id) {
+						} else {
+							resolution, resolveErr := service.ResolveAndApplyGroupBilling(c, usingGroup, modelRequest.Model)
+							if resolveErr == nil && model.IsChannelEnabledForGroupModelTag(usingGroup, modelRequest.Model, resolution.MatchedTag, preferred.Id) {
 							channel = preferred
 							selectGroup = usingGroup
 							service.MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
+						}
 						}
 					}
 				}
@@ -366,6 +373,11 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	common.SetContextKey(c, constant.ContextKeyChannelAutoBan, channel.GetAutoBan())
 	common.SetContextKey(c, constant.ContextKeyChannelModelMapping, channel.GetModelMapping())
 	common.SetContextKey(c, constant.ContextKeyChannelStatusCodeMapping, channel.GetStatusCodeMapping())
+	if channel.Tag != nil {
+		common.SetContextKey(c, constant.ContextKeyChannelTag, *channel.Tag)
+	} else {
+		common.SetContextKey(c, constant.ContextKeyChannelTag, "")
+	}
 
 	key, index, newAPIError := channel.GetNextEnabledKey()
 	if newAPIError != nil {

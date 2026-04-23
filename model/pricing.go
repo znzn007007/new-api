@@ -31,8 +31,18 @@ type Pricing struct {
 	AudioRatio             *float64                `json:"audio_ratio,omitempty"`
 	AudioCompletionRatio   *float64                `json:"audio_completion_ratio,omitempty"`
 	EnableGroup            []string                `json:"enable_groups"`
+	EffectiveGroupPricing  map[string]EffectiveGroupPricing `json:"effective_group_pricing,omitempty"`
 	SupportedEndpointTypes []constant.EndpointType `json:"supported_endpoint_types"`
 	PricingVersion         string                  `json:"pricing_version,omitempty"`
+}
+
+type EffectiveGroupPricing struct {
+	Group                string  `json:"group"`
+	Ratio                float64 `json:"ratio"`
+	MatchedTag           string  `json:"matched_tag,omitempty"`
+	BillingAttribution   string  `json:"billing_attribution,omitempty"`
+	BillingRatioSource   string  `json:"billing_ratio_source,omitempty"`
+	BillingRatioFallback bool    `json:"billing_ratio_fallback"`
 }
 
 type PricingVendor struct {

@@ -74,10 +74,37 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	appendRequestPath(ctx, relayInfo, other)
 	appendRequestConversionChain(relayInfo, other)
 	appendFinalRequestFormat(relayInfo, other)
+	appendEffectiveBillingDetails(relayInfo, other)
 	appendBillingInfo(relayInfo, other)
 	appendParamOverrideInfo(relayInfo, other)
 	appendStreamStatus(relayInfo, other)
 	return other
+}
+
+func appendEffectiveBillingDetails(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
+	if relayInfo == nil || other == nil {
+		return
+	}
+	info := relayInfo.PriceData.GroupRatioInfo
+	if info.PublicGroup != "" {
+		other["selected_public_group"] = info.PublicGroup
+	}
+	if info.MatchedTag != "" {
+		other["matched_channel_tag"] = info.MatchedTag
+	}
+	if info.BillingAttribution != "" {
+		other["billing_attribution"] = info.BillingAttribution
+	}
+	other["effective_billing_ratio"] = info.GroupRatio
+	if info.BillingRatioSource != "" {
+		other["billing_ratio_source"] = info.BillingRatioSource
+	}
+	if info.BillingRatioFallback {
+		other["billing_ratio_fallback"] = true
+	}
+	if info.PublicGroup != "" {
+		other["public_group_default_ratio"] = info.GroupDefaultRatio
+	}
 }
 
 func appendParamOverrideInfo(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {

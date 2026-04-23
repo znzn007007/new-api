@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"sort"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
@@ -8,6 +10,45 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+func getVisibleGroupRatio(userGroup, publicGroup string) (float64, string) {
+	if ratio, ok := ratio_setting.GetGroupGroupRatio(userGroup, publicGroup); ok {
+		return ratio, "public_group_special"
+	}
+	return ratio_setting.GetGroupRatio(publicGroup), "public_group_default"
+}
+
+func enrichEffectiveGroupPricing(pricing []model.Pricing, userGroup string) {
+	for i := range pricing {
+		if len(pricing[i].EnableGroup) == 0 {
+			continue
+		}
+		effectivePricing := make(map[string]model.EffectiveGroupPricing, len(pricing[i].EnableGroup))
+		for _, publicGroup := range pricing[i].EnableGroup {
+			resolution, err := service.ResolveGroupBilling(publicGroup, userGroup, pricing[i].ModelName)
+			if err != nil {
+				ratio, source := getVisibleGroupRatio(userGroup, publicGroup)
+				effectivePricing[publicGroup] = model.EffectiveGroupPricing{
+					Group:                publicGroup,
+					Ratio:                ratio,
+					BillingAttribution:   publicGroup,
+					BillingRatioSource:   source,
+					BillingRatioFallback: true,
+				}
+				continue
+			}
+			effectivePricing[publicGroup] = model.EffectiveGroupPricing{
+				Group:                publicGroup,
+				Ratio:                resolution.EffectiveRatio,
+				MatchedTag:           resolution.MatchedTag,
+				BillingAttribution:   resolution.BillingAttribution,
+				BillingRatioSource:   resolution.BillingRatioSource,
+				BillingRatioFallback: resolution.BillingRatioFallback,
+			}
+		}
+		pricing[i].EffectiveGroupPricing = effectivePricing
+	}
+}
 
 func filterPricingByUsableGroups(pricing []model.Pricing, usableGroup map[string]string) []model.Pricing {
 	if len(pricing) == 0 {
@@ -19,15 +60,25 @@ func filterPricingByUsableGroups(pricing []model.Pricing, usableGroup map[string
 
 	filtered := make([]model.Pricing, 0, len(pricing))
 	for _, item := range pricing {
+		visibleGroups := make([]string, 0)
 		if common.StringsContains(item.EnableGroup, "all") {
-			filtered = append(filtered, item)
-			continue
-		}
-		for _, group := range item.EnableGroup {
-			if _, ok := usableGroup[group]; ok {
-				filtered = append(filtered, item)
-				break
+			for group := range usableGroup {
+				if group == "auto" || group == "" {
+					continue
+				}
+				visibleGroups = append(visibleGroups, group)
 			}
+		} else {
+			for _, group := range item.EnableGroup {
+				if _, ok := usableGroup[group]; ok {
+					visibleGroups = append(visibleGroups, group)
+				}
+			}
+		}
+		if len(visibleGroups) > 0 {
+			sort.Strings(visibleGroups)
+			item.EnableGroup = visibleGroups
+			filtered = append(filtered, item)
 		}
 	}
 	return filtered
@@ -57,6 +108,7 @@ func GetPricing(c *gin.Context) {
 
 	usableGroup = service.GetUserUsableGroups(group)
 	pricing = filterPricingByUsableGroups(pricing, usableGroup)
+	enrichEffectiveGroupPricing(pricing, group)
 	// check groupRatio contains usableGroup
 	for group := range ratio_setting.GetGroupRatioCopy() {
 		if _, ok := usableGroup[group]; !ok {

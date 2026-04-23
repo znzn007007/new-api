@@ -1,8 +1,8 @@
 package ratio_setting
 
 import (
-	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/config"
@@ -32,10 +32,20 @@ var defaultGroupSpecialUsableGroup = map[string]map[string]string{
 	},
 }
 
+var defaultPublicGroupTagRatio = map[string]map[string]float64{}
+
+var publicGroupTagRatioMap = types.NewRWMap[string, map[string]float64]()
+
+var defaultPublicGroupModelTagOverride = map[string]map[string]string{}
+
+var publicGroupModelTagOverrideMap = types.NewRWMap[string, map[string]string]()
+
 type GroupRatioSetting struct {
 	GroupRatio              *types.RWMap[string, float64]            `json:"group_ratio"`
 	GroupGroupRatio         *types.RWMap[string, map[string]float64] `json:"group_group_ratio"`
 	GroupSpecialUsableGroup *types.RWMap[string, map[string]string]  `json:"group_special_usable_group"`
+	PublicGroupTagRatio     *types.RWMap[string, map[string]float64] `json:"public_group_tag_ratio"`
+	PublicGroupModelTag     *types.RWMap[string, map[string]string]  `json:"public_group_model_tag"`
 }
 
 var groupRatioSetting GroupRatioSetting
@@ -46,11 +56,15 @@ func init() {
 
 	groupRatioMap.AddAll(defaultGroupRatio)
 	groupGroupRatioMap.AddAll(defaultGroupGroupRatio)
+	publicGroupTagRatioMap.AddAll(defaultPublicGroupTagRatio)
+	publicGroupModelTagOverrideMap.AddAll(defaultPublicGroupModelTagOverride)
 
 	groupRatioSetting = GroupRatioSetting{
 		GroupSpecialUsableGroup: groupSpecialUsableGroup,
 		GroupRatio:              groupRatioMap,
 		GroupGroupRatio:         groupGroupRatioMap,
+		PublicGroupTagRatio:     publicGroupTagRatioMap,
+		PublicGroupModelTag:     publicGroupModelTagOverrideMap,
 	}
 
 	config.GlobalConfig.Register("group_ratio_setting", &groupRatioSetting)
@@ -60,6 +74,14 @@ func GetGroupRatioSetting() *GroupRatioSetting {
 	if groupRatioSetting.GroupSpecialUsableGroup == nil {
 		groupRatioSetting.GroupSpecialUsableGroup = types.NewRWMap[string, map[string]string]()
 		groupRatioSetting.GroupSpecialUsableGroup.AddAll(defaultGroupSpecialUsableGroup)
+	}
+	if groupRatioSetting.PublicGroupTagRatio == nil {
+		groupRatioSetting.PublicGroupTagRatio = types.NewRWMap[string, map[string]float64]()
+		groupRatioSetting.PublicGroupTagRatio.AddAll(defaultPublicGroupTagRatio)
+	}
+	if groupRatioSetting.PublicGroupModelTag == nil {
+		groupRatioSetting.PublicGroupModelTag = types.NewRWMap[string, map[string]string]()
+		groupRatioSetting.PublicGroupModelTag.AddAll(defaultPublicGroupModelTagOverride)
 	}
 	return &groupRatioSetting
 }
@@ -112,7 +134,7 @@ func UpdateGroupGroupRatioByJSONString(jsonStr string) error {
 
 func CheckGroupRatio(jsonStr string) error {
 	checkGroupRatio := make(map[string]float64)
-	err := json.Unmarshal([]byte(jsonStr), &checkGroupRatio)
+	err := common.Unmarshal([]byte(jsonStr), &checkGroupRatio)
 	if err != nil {
 		return err
 	}
@@ -120,6 +142,78 @@ func CheckGroupRatio(jsonStr string) error {
 		if ratio < 0 {
 			return errors.New("group ratio must be not less than 0: " + name)
 		}
+	}
+	return nil
+}
+
+func PublicGroupTagRatio2JSONString() string {
+	return publicGroupTagRatioMap.MarshalJSONString()
+}
+
+func UpdatePublicGroupTagRatioByJSONString(jsonStr string) error {
+	if strings.TrimSpace(jsonStr) == "" {
+		jsonStr = "{}"
+	}
+	return types.LoadFromJsonString(publicGroupTagRatioMap, jsonStr)
+}
+
+func GetPublicGroupTagRatio(group, tag string) (float64, bool) {
+	if tag == "" {
+		return 0, false
+	}
+	groupRules, ok := publicGroupTagRatioMap.Get(group)
+	if !ok {
+		return 0, false
+	}
+	ratio, ok := groupRules[tag]
+	return ratio, ok
+}
+
+func CheckPublicGroupTagRatio(jsonStr string) error {
+	if strings.TrimSpace(jsonStr) == "" {
+		return nil
+	}
+	checkRules := make(map[string]map[string]float64)
+	if err := common.Unmarshal([]byte(jsonStr), &checkRules); err != nil {
+		return err
+	}
+	for group, tagRules := range checkRules {
+		for tag, ratio := range tagRules {
+			if ratio < 0 {
+				return errors.New("public-group tag ratio must be not less than 0: " + group + "/" + tag)
+			}
+		}
+	}
+	return nil
+}
+
+func PublicGroupModelTagOverride2JSONString() string {
+	return publicGroupModelTagOverrideMap.MarshalJSONString()
+}
+
+func UpdatePublicGroupModelTagOverrideByJSONString(jsonStr string) error {
+	if strings.TrimSpace(jsonStr) == "" {
+		jsonStr = "{}"
+	}
+	return types.LoadFromJsonString(publicGroupModelTagOverrideMap, jsonStr)
+}
+
+func GetPublicGroupModelTagOverride(group, model string) (string, bool) {
+	groupRules, ok := publicGroupModelTagOverrideMap.Get(group)
+	if !ok {
+		return "", false
+	}
+	tag, ok := groupRules[model]
+	return tag, ok
+}
+
+func CheckPublicGroupModelTagOverride(jsonStr string) error {
+	if strings.TrimSpace(jsonStr) == "" {
+		return nil
+	}
+	checkRules := make(map[string]map[string]string)
+	if err := common.Unmarshal([]byte(jsonStr), &checkRules); err != nil {
+		return err
 	}
 	return nil
 }

@@ -37,10 +37,15 @@ const (
 	ContextKeyChannelIsMultiKey        ContextKey = "channel_is_multi_key"
 	ContextKeyChannelMultiKeyIndex     ContextKey = "channel_multi_key_index"
 	ContextKeyChannelKey               ContextKey = "channel_key"
+	ContextKeyChannelTag               ContextKey = "channel_tag"
 
 	ContextKeyAutoGroup           ContextKey = "auto_group"
 	ContextKeyAutoGroupIndex      ContextKey = "auto_group_index"
 	ContextKeyAutoGroupRetryIndex ContextKey = "auto_group_retry_index"
+	ContextKeyResolvedChannelTag  ContextKey = "resolved_channel_tag"
+	ContextKeyBillingAttribution  ContextKey = "billing_attribution"
+	ContextKeyBillingRatioSource  ContextKey = "billing_ratio_source"
+	ContextKeyBillingRatioFallback ContextKey = "billing_ratio_fallback"
 
 	/* user related keys */
 	ContextKeyUserId      ContextKey = "id"
