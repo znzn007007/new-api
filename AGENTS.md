@@ -33,6 +33,7 @@ types/         — Type definitions (relay formats, file sources, errors)
 i18n/          — Backend internationalization (go-i18n, en/zh)
 oauth/         — OAuth provider implementations
 pkg/           — Internal packages (cachex, ionet)
+docs/solutions/ — Documented solutions and best practices, organized by category with searchable YAML frontmatter (for example `module`, `tags`, `problem_type`); relevant when implementing or debugging in documented areas
 web/           — React frontend
   web/src/i18n/  — Frontend internationalization (i18next, zh/en/fr/ru/ja/vi)
 ```
