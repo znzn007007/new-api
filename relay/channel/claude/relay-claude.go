@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -381,9 +382,22 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 						if source == nil {
 							continue
 						}
+						if file := mediaMessage.GetFile(); file != nil {
+							applyClaudeFileMimeHint(source, file.FileName)
+						}
 						base64Data, mimeType, err := service.GetBase64Data(c, source, "formatting image for Claude")
 						if err != nil {
 							return nil, fmt.Errorf("get file data failed: %s", err.Error())
+						}
+						if textContent, ok := decodeClaudeTextFile(base64Data, mimeType); ok {
+							claudeMediaMessages = append(claudeMediaMessages, dto.ClaudeMediaMessage{
+								Type: "text",
+								Text: common.GetPointer(textContent),
+							})
+							continue
+						}
+						if !supportsClaudeBinaryFile(mimeType) {
+							continue
 						}
 						claudeMediaMessage := dto.ClaudeMediaMessage{
 							Source: &dto.ClaudeMessageSource{
@@ -432,6 +446,33 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 	claudeRequest.Prompt = ""
 	claudeRequest.Messages = claudeMessages
 	return &claudeRequest, nil
+}
+
+func applyClaudeFileMimeHint(source types.FileSource, fileName string) {
+	base64Source, ok := source.(*types.Base64Source)
+	if !ok || base64Source.MimeType != "" || fileName == "" {
+		return
+	}
+	if dot := strings.LastIndex(fileName, "."); dot != -1 && dot+1 < len(fileName) {
+		if mimeType := service.GetMimeTypeByExtension(fileName[dot+1:]); mimeType != "" && mimeType != "application/octet-stream" {
+			base64Source.MimeType = mimeType
+		}
+	}
+}
+
+func decodeClaudeTextFile(base64Data string, mimeType string) (string, bool) {
+	if !strings.HasPrefix(mimeType, "text/") {
+		return "", false
+	}
+	decoded, err := base64.StdEncoding.DecodeString(base64Data)
+	if err != nil {
+		return "", false
+	}
+	return string(decoded), true
+}
+
+func supportsClaudeBinaryFile(mimeType string) bool {
+	return strings.HasPrefix(mimeType, "image/") || strings.HasPrefix(mimeType, "application/pdf")
 }
 
 func StreamResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.ChatCompletionsStreamResponse {

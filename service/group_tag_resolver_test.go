@@ -15,6 +15,9 @@ import (
 func setupGroupTagResolverTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
+	previousDB := model.DB
+	previousLogDB := model.LOG_DB
+
 	common.UsingSQLite = true
 	common.UsingMySQL = false
 	common.UsingPostgreSQL = false
@@ -38,6 +41,8 @@ func setupGroupTagResolverTestDB(t *testing.T) *gorm.DB {
 		if err == nil {
 			_ = sqlDB.Close()
 		}
+		model.DB = previousDB
+		model.LOG_DB = previousLogDB
 	})
 
 	return db
